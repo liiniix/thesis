@@ -1,260 +1,22 @@
-from __future__ import print_function
+# -*- coding:utf-8 -*-
 
-import numpy
-from sklearn.metrics import f1_score, accuracy_score
-from sklearn.multiclass import OneVsRestClassifier
-from sklearn.preprocessing import MultiLabelBinarizer
-
-
-class TopKRanker(OneVsRestClassifier):
-    def predict(self, X, top_k_list):
-        probs = numpy.asarray(super(TopKRanker, self).predict_proba(X))
-        all_labels = []
-        for i, k in enumerate(top_k_list):
-            probs_ = probs[i, :]
-            labels = self.classes_[probs_.argsort()[-k:]].tolist()
-            probs_[:] = 0
-            probs_[labels] = 1
-            all_labels.append(probs_)
-        return numpy.asarray(all_labels)
+"""
 
 
 
-class Classifier(object):
+Author:
 
-    def __init__(self, embeddings, clf):
-        self.embeddings = embeddings
-        self.clf = TopKRanker(clf)
-        self.binarizer = MultiLabelBinarizer(sparse_output=True)
-
-    def train(self, X, Y, Y_all):
-        self.binarizer.fit(Y_all)
-        X_train = [self.embeddings[x] for x in X]
-        Y = self.binarizer.transform(Y)
-        self.clf.fit(X_train, Y)
-
-    def evaluate(self, X, Y):
-        top_k_list = [len(l) for l in Y]
-        Y_ = self.predict(X, top_k_list)
-        Y = self.binarizer.transform(Y)
-        averages = ["micro", "macro", "samples", "weighted"]
-        results = {}
-        for average in averages:
-            results[average] = f1_score(Y, Y_, average=average)
-        results['acc'] = accuracy_score(Y,Y_)
-        print('-------------------')
-        print(results)
-        return results
-        print('-------------------')
-
-    def predict(self, X, top_k_list):
-        X_ = numpy.asarray([self.embeddings[x] for x in X])
-        Y = self.clf.predict(X_, top_k_list=top_k_list)
-        return Y
-
-    def split_train_evaluate(self, X, Y, train_precent, seed=0):
-        state = numpy.random.get_state()
-
-        training_size = int(train_precent * len(X))
-        numpy.random.seed(seed)
-        shuffle_indices = numpy.random.permutation(numpy.arange(len(X)))
-        X_train = [X[shuffle_indices[i]] for i in range(training_size)]
-        Y_train = [Y[shuffle_indices[i]] for i in range(training_size)]
-        X_test = [X[shuffle_indices[i]] for i in range(training_size, len(X))]
-        Y_test = [Y[shuffle_indices[i]] for i in range(training_size, len(X))]
-
-        self.train(X_train, Y_train, Y)
-        numpy.random.set_state(state)
-        return self.evaluate(X_test, Y_test)
+    Weichen Shen,wcshen1994@163.com
 
 
 
-def read_node_label(filename, skip_head=False):
-    with open(filename, 'r') as fin:
-        X = []
-        Y = []
-        lines = fin.readlines()
-        if skip_head:
-            lines = lines[1:]
-        for line in lines:
-            vec = line.strip().split(' ')
-            X.append(vec[0])
-            Y.append(vec[1])
-    return X, Y
+Reference:
+
+    [1] Ribeiro L F R, Saverese P H P, Figueiredo D R. struc2vec: Learning node representations from structural identity[C]//Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining. ACM, 2017: 385-394.(https://arxiv.org/pdf/1704.03165.pdf)
 
 
 
-def create_alias_table(area_ratio):
-    """
-
-    :param area_ratio: sum(area_ratio)=1
-    :return: accept,alias
-    """
-    l = len(area_ratio)
-    accept, alias = [0] * l, [0] * l
-    small, large = [], []
-    area_ratio_ = np.array(area_ratio) * l
-    for i, prob in enumerate(area_ratio_):
-        if prob < 1.0:
-            small.append(i)
-        else:
-            large.append(i)
-
-    while small and large:
-        small_idx, large_idx = small.pop(), large.pop()
-        accept[small_idx] = area_ratio_[small_idx]
-        alias[small_idx] = large_idx
-        area_ratio_[large_idx] = area_ratio_[large_idx] - \
-            (1 - area_ratio_[small_idx])
-        if area_ratio_[large_idx] < 1.0:
-            small.append(large_idx)
-        else:
-            large.append(large_idx)
-
-    while large:
-        large_idx = large.pop()
-        accept[large_idx] = 1
-    while small:
-        small_idx = small.pop()
-        accept[small_idx] = 1
-
-    return accept, alias
-
-
-
-def alias_sample(accept, alias):
-    """
-
-    :param accept:
-    :param alias:
-    :return: sample index
-    """
-    N = len(accept)
-    i = int(np.random.random()*N)
-    r = np.random.random()
-    if r < accept[i]:
-        return i
-    else:
-        return alias[i]
-
-
-def partition_dict(vertices, workers):
-    batch_size = (len(vertices) - 1) // workers + 1
-    part_list = []
-    part = []
-    count = 0
-    for v1, nbs in vertices.items():
-        part.append((v1, nbs))
-        count += 1
-        if count % batch_size == 0:
-            part_list.append(part)
-            part = []
-    if len(part) > 0:
-        part_list.append(part)
-    return part_list
-
-def preprocess_nxgraph(graph):
-    node2idx = {}
-    idx2node = []
-    node_size = 0
-    for node in graph.nodes():
-        node2idx[node] = node_size
-        idx2node.append(node)
-        node_size += 1
-    return idx2node, node2idx
-
-def partition_num(num, workers):
-    if num % workers == 0:
-        return [num//workers]*workers
-    else:
-        return [num//workers]*workers + [num % workers]
-
-
-
-
-import itertools
-import math
-import random
-
-
-def chooseNeighbor(v, graphs, layers_alias, layers_accept, layer):
-
-    v_list = graphs[layer][v]
-
-    idx = alias_sample(layers_accept[layer][v], layers_alias[layer][v])
-    v = v_list[idx]
-
-    return v
-
-
-
-class BiasedWalker:
-    def __init__(self, idx2node, temp_path):
-
-        self.idx2node = idx2node
-        self.idx = list(range(len(self.idx2node)))
-        self.temp_path = temp_path
-        pass
-
-    def simulate_walks(self, num_walks, walk_length, stay_prob=0.3, workers=1, verbose=0):
-
-        layers_adj = pd.read_pickle(self.temp_path+'layers_adj.pkl')
-        layers_alias = pd.read_pickle(self.temp_path+'layers_alias.pkl')
-        layers_accept = pd.read_pickle(self.temp_path+'layers_accept.pkl')
-        gamma = pd.read_pickle(self.temp_path+'gamma.pkl')
-        walks = []
-        initialLayer = 0
-
-        nodes = self.idx  # list(self.g.nodes())
-
-        results = Parallel(n_jobs=workers, verbose=verbose, )(
-            delayed(self._simulate_walks)(nodes, num, walk_length, stay_prob, layers_adj, layers_accept, layers_alias, gamma) for num in
-            partition_num(num_walks, workers))
-
-        walks = list(itertools.chain(*results))
-        return walks
-
-    def _simulate_walks(self, nodes, num_walks, walk_length, stay_prob, layers_adj, layers_accept, layers_alias, gamma):
-        walks = []
-        for _ in range(num_walks):
-            random.shuffle(nodes)
-            for v in nodes:
-                walks.append(self._exec_random_walk(layers_adj, layers_accept, layers_alias,
-                                                    v, walk_length, gamma, stay_prob))
-        return walks
-
-    def _exec_random_walk(self, graphs, layers_accept, layers_alias, v, walk_length, gamma, stay_prob=0.3):
-        initialLayer = 0
-        layer = initialLayer
-
-        path = []
-        path.append(self.idx2node[v])
-
-        while len(path) < walk_length:
-            r = random.random()
-            if(r < stay_prob):  # same layer
-                v = chooseNeighbor(v, graphs, layers_alias,
-                                   layers_accept, layer)
-                path.append(self.idx2node[v])
-            else:  # different layer
-                r = random.random()
-                try:
-                    x = math.log(gamma[layer][v] + math.e)
-                    p_moveup = (x / (x + 1))
-                except:
-                    print(layer, v)
-                    raise ValueError()
-
-                if(r > p_moveup):
-                    if(layer > initialLayer):
-                        layer = layer - 1
-                else:
-                    if((layer + 1) in graphs and v in graphs[layer + 1]):
-                        layer = layer + 1
-
-        return path
-
-
+"""
 
 import math
 import os
@@ -266,16 +28,17 @@ import pandas as pd
 from fastdtw import fastdtw
 from gensim.models import Word2Vec
 from joblib import Parallel, delayed
-#from tqdm import tqdm
+from tqdm import tqdm
+
+from .alias import create_alias_table
+from .utils import partition_dict, preprocess_nxgraph
+from .walker import BiasedWalker
 
 
 class Struc2Vec():
-    def __init__(self, graph, walk_length=10, num_walks=100, workers=1, verbose=0, stay_prob=0.3, 
-                opt1_reduce_len=True, opt2_reduce_sim_calc=True, opt3_num_layers=None, 
-                temp_path='./temp_struc2vec/', reuse=False):
+    def __init__(self, graph, walk_length=10, num_walks=100, workers=1, verbose=0, stay_prob=0.3, opt1_reduce_len=True, opt2_reduce_sim_calc=True, opt3_num_layers=None, temp_path='./temp_struc2vec/', reuse=False):
         self.graph = graph
         self.idx2node, self.node2idx = preprocess_nxgraph(graph)
-        print("Graph preprocessed")
         self.idx = list(range(len(self.idx2node)))
 
         self.opt1_reduce_len = opt1_reduce_len
@@ -290,33 +53,24 @@ class Struc2Vec():
         if not reuse:
             shutil.rmtree(self.temp_path)
             os.mkdir(self.temp_path)
-            
-        print("Starting to create Context Graph")
+
         self.create_context_graph(self.opt3_num_layers, workers, verbose)
-        print("Context Graph Created!!")
         self.prepare_biased_walk()
-        print("Biased walk prepared")
         self.walker = BiasedWalker(self.idx2node, self.temp_path)
-        print("Biased Walker class created")
         self.sentences = self.walker.simulate_walks(
             num_walks, walk_length, stay_prob, workers, verbose)
-        print("Walker walks simulated")
 
         self._embeddings = {}
 
     def create_context_graph(self, max_num_layers, workers=1, verbose=0,):
 
-        print("Computing Structural distance")
         pair_distances = self._compute_structural_distance(
             max_num_layers, workers, verbose,)
-        print("Structural Distance computed")
         layers_adj, layers_distances = self._get_layer_rep(pair_distances)
-        print("Layer representation collected")
         pd.to_pickle(layers_adj, self.temp_path + 'layers_adj.pkl')
 
         layers_accept, layers_alias = self._get_transition_probs(
             layers_adj, layers_distances)
-        print("Transititon probabilities obtained")
         pd.to_pickle(layers_alias, self.temp_path + 'layers_alias.pkl')
         pd.to_pickle(layers_accept, self.temp_path + 'layers_accept.pkl')
 
@@ -372,7 +126,7 @@ class Struc2Vec():
 
         self._embeddings = {}
         for word in self.graph.nodes():
-            self._embeddings[int(word)] = self.w2v_model.wv[word]
+            self._embeddings[word] = self.w2v_model.wv[word]
 
         return self._embeddings
 
@@ -380,8 +134,7 @@ class Struc2Vec():
 
         degreeList = {}
         vertices = self.idx  # self.g.nodes()
-        print("Computing ordered degree list")
-        for v in vertices: #tqdm(vertices):
+        for v in vertices:
             degreeList[v] = self._get_order_degreelist_node(v, max_num_layers)
         return degreeList
 
@@ -453,7 +206,7 @@ class Struc2Vec():
                 degreeListsSelected = {}
                 vertices = {}
                 n_nodes = len(self.idx)
-                for v in self.idx: #tqdm(self.idx):  # c:list of vertex
+                for v in self.idx:  # c:list of vertex
                     nbs = get_vertices(
                         v, len(self.graph[self.idx2node[v]]), degrees, n_nodes)
                     vertices[v] = nbs  # store nbs
@@ -463,17 +216,14 @@ class Struc2Vec():
                         degreeListsSelected[n] = degreeList[n]
             else:
                 vertices = {}
-                for v in degreeList: #tqdm(degreeList):
+                for v in degreeList:
                     vertices[v] = [vd for vd in degreeList.keys() if vd > v]
 
-            print("Vertices dictionary created")
             results = Parallel(n_jobs=workers, verbose=verbose,)(
                 delayed(compute_dtw_dist)(part_list, degreeList, dist_func) for part_list in partition_dict(vertices, workers))
             dtw_dist = dict(ChainMap(*results))
-            print("Partition Dict created")
 
             structural_dist = convert_dtw_struc_dist(dtw_dist)
-            print("Structural dist dtw converted")
             pd.to_pickle(structural_dist, self.temp_path +
                          'structural_dist.pkl')
 
@@ -559,7 +309,6 @@ class Struc2Vec():
             layers_accept[layer] = node_accept_dict
 
         return layers_accept, layers_alias
-
 
 
 def cost(a, b):
@@ -672,7 +421,7 @@ def verifyDegrees(degrees, degree_v_root, degree_a, degree_b):
 
 def compute_dtw_dist(part_list, degreeList, dist_func):
     dtw_dist = {}
-    for v1, nbs in part_list: #tqdm(part_list):
+    for v1, nbs in part_list:
         lists_v1 = degreeList[v1]  # lists_v1 :orderd degree list of v1
         for v2 in nbs:
             lists_v2 = degreeList[v2]  # lists_v1 :orderd degree list of v2
@@ -683,31 +432,3 @@ def compute_dtw_dist(part_list, degreeList, dist_func):
                     lists_v1[layer], lists_v2[layer], radius=1, dist=dist_func)
                 dtw_dist[v1, v2][layer] = dist
     return dtw_dist
-
-
-
-from sklearn.linear_model import LogisticRegression
-
-import matplotlib.pyplot as plt
-import networkx as nx
-from sklearn.manifold import TSNE
-
-
-
-def plot_embeddings_modified(embeddings,):
-    emb_list = []
-
-    for k in range(len(embeddings.keys())):
-        emb_list.append(embeddings[k+1])
-    emb_list = np.array(emb_list)
-
-    print(emb_list.shape)
-
-    model = TSNE(n_components=2)
-    node_pos = model.fit_transform(emb_list)
-
-    plt.scatter(node_pos[:, 0], node_pos[:, 1])
-
-    plt.legend()
-    plt.show()
-    return emb_list, node_pos
