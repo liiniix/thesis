@@ -44,7 +44,7 @@ def load_pos_neg(data_path):
     with open(data_path) as f:
         eid = 0
         for idx, line in tqdm.tqdm(enumerate(f)):
-            src, dst = line.strip().split('\t')
+            src, dst = line.strip().split()
             train_src.append(int(src))
             train_dst.append(int(dst))
             train_eid.append(int(eid))
