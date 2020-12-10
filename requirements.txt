@@ -1,0 +1,9 @@
+numpy >= 1.16.4
+cython >= 0.25.2
+
+paddlepaddle-gpu
+pgl
+
+redis-py-cluster
+
+visualdl >= 2.0.0b ; python_version >= "3"
