@@ -363,6 +363,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+    paddle.enable_static()
     parser = argparse.ArgumentParser(description='graphsage')
     parser.add_argument(
         "--use_cuda", action='store_true', help="use_cuda", default=False)
